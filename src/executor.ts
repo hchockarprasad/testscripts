@@ -52,7 +52,7 @@ export class Executor {
     this.reset();
   }
 
-  async buyPosition() {
+  async buyPosition(value: number) {
     let stock = await this.connection.createMarketBuyOrder(
       this.stockSymbol,
       this.currentFactor,
@@ -62,9 +62,10 @@ export class Executor {
     this.txnCounter += 1;
     this.lastTxnMode = TransactionMode.Buy;
     this.currentFactor *= this.jumpFactor;
+    this.bounds.upper = value;
   }
 
-  async sellPosition() {
+  async sellPosition(value: number) {
     let stock = await this.connection.createMarketSellOrder(
       this.stockSymbol,
       this.currentFactor,
@@ -74,40 +75,40 @@ export class Executor {
     this.txnCounter += 1;
     this.lastTxnMode = TransactionMode.Sell;
     this.currentFactor *= this.jumpFactor;
+    this.bounds.lower = value;
   }
 
   async triggerClose(ask: number, mode: TransactionMode) {
     if (this.maxTxnLimit > 0) {
       if (this.txnCounter <= this.maxTxnLimit && this.lastTxnMode == mode) {
         await this.closePosition();
-        await this.buyPosition();
-        this.bounds = new Bounds(ask, ask - this.threshold);
-        console.log(this.bounds);
+        await this.buyPosition(ask);
+        this.bounds.lower = ask - this.threshold;
       }
     } else {
       await this.closePosition();
-      await this.buyPosition();
-      this.bounds = new Bounds(ask, ask - this.threshold);
+      await this.buyPosition(ask);
+      this.bounds.lower = ask - this.threshold;
     }
   }
 
-  async triggerBuy() {
+  async triggerBuy(value: number) {
     if (this.maxTxnLimit > 0) {
       if (this.txnCounter < this.maxTxnLimit) {
-        await this.buyPosition();
+        await this.buyPosition(value);
       }
     } else {
-      await this.buyPosition();
+      await this.buyPosition(value);
     }
   }
 
-  async triggerSell() {
+  async triggerSell(value: number) {
     if (this.maxTxnLimit > 0) {
       if (this.txnCounter < this.maxTxnLimit) {
-        await this.sellPosition();
+        await this.sellPosition(value);
       }
     } else {
-      await this.sellPosition();
+      await this.sellPosition(value);
     }
   }
 
@@ -129,16 +130,16 @@ export class Executor {
         price.ask >= this.bounds.upper &&
         this.lastTxnMode != TransactionMode.Buy
       ) {
-        this.triggerBuy();
+        this.triggerBuy(price.ask);
       } else if (
         price.bid <= this.bounds.lower &&
         this.lastTxnMode != TransactionMode.Sell
       ) {
-        this.triggerSell();
+        this.triggerSell(price.bid);
       }
     } else {
-      await this.buyPosition();
       this.bounds = new Bounds(price.ask, price.ask - this.threshold);
+      await this.buyPosition(price.ask);
       console.log('Upper Bound ' + this.bounds.upper);
       console.log('Lower Bound ' + this.bounds.lower);
     }
