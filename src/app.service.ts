@@ -35,7 +35,7 @@ export class AppService {
     for (const account of accounts) {
       let connection = await account.getStreamingConnection();
 
-      const executor = new Executor(connection, 5, 0.25, 10);
+      const executor = new Executor(connection, 5, 2, 5);
       const quoteListener = new QuoteListener(executor);
       connection.addSynchronizationListener(quoteListener);
       await connection.waitSynchronized();

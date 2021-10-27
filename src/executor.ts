@@ -78,17 +78,17 @@ export class Executor {
     this.bounds.lower = value;
   }
 
-  async triggerClose(ask: number, mode: TransactionMode) {
+  async triggerClose(value: number, mode: TransactionMode) {
     if (this.maxTxnLimit > 0) {
       if (this.txnCounter <= this.maxTxnLimit && this.lastTxnMode == mode) {
         await this.closePosition();
-        await this.buyPosition(ask);
-        this.bounds.lower = ask - this.threshold;
+        await this.buyPosition(value);
+        this.bounds.lower = value - this.threshold;
       }
     } else {
       await this.closePosition();
-      await this.buyPosition(ask);
-      this.bounds.lower = ask - this.threshold;
+      await this.buyPosition(value);
+      this.bounds.lower = value - this.threshold;
     }
   }
 
