@@ -14,9 +14,15 @@ class QuoteListener extends SynchronizationListener {
   }
 
   async onSymbolPriceUpdated(_: string, price: Price) {
+    console.log(price);
     if (price.symbol === SYMBOL) {
-      await this.executor.send(price);
+      console.log(price);
+      // await this.executor.send(price);
     }
+  }
+
+  async onPositionRemoved(_: string, positionId: string) {
+    // this.executor.removePosition(positionId);
   }
 }
 
@@ -34,8 +40,7 @@ export class AppService {
     let accounts = await this._metaApi.metatraderAccountApi.getAccounts();
     for (const account of accounts) {
       let connection = await account.getStreamingConnection();
-
-      const executor = new Executor(connection, 5, 2, 5);
+      const executor = new Executor(connection, 5, 0.25, 5);
       const quoteListener = new QuoteListener(executor);
       connection.addSynchronizationListener(quoteListener);
       await connection.waitSynchronized();
