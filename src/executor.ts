@@ -1,10 +1,16 @@
 class Stock {
+  isOpen = true;
   constructor(
     public order: string,
     public position: string,
     public mode: TransactionMode,
     public price: number,
+    public qty: number,
   ) {}
+
+  close() {
+    this.isOpen = false;
+  }
 }
 
 export class Price {
@@ -24,13 +30,11 @@ class Bounds {
 
 export class Executor {
   stocks: Array<Stock> = [];
-  lastTxnMode?: TransactionMode;
-  txnCounter = 0;
   currentFactor: number;
   stockSymbol = 'XAUUSD';
-  // bounds = new Bounds();
 
   constructor(
+    public name: string,
     private connection: any,
     private jumpFactor: number,
     private threshold: number,
@@ -42,64 +46,58 @@ export class Executor {
 
   reset() {
     this.currentFactor = this.initFactor;
-    this.txnCounter = 0;
     this.stocks = [];
   }
 
   async closePosition() {
     for (const stock of this.stocks) {
-      await this.connection.closePosition(stock.position);
+      if (stock.isOpen) {
+        await this.connection.closePosition(stock.position);
+      }
     }
     this.reset();
   }
 
-  async buyPosition(value: number) {
-    let stock = await this.connection.createMarketBuyOrder(
-      this.stockSymbol,
-      this.currentFactor,
-    );
+  getMissing(mode: TransactionMode) {
+    return this.stocks
+      .filter((x) => x.mode == mode && !x.isOpen)
+      .map((x) => x.qty)
+      .reduce((prev, curr) => prev + curr, 0);
+  }
 
-    this.stocks.push(
-      new Stock(stock.orderId, stock.positionId, TransactionMode.Buy, value),
-    );
-    this.txnCounter += 1;
-    this.lastTxnMode = TransactionMode.Buy;
+  async buyPosition(value: number) {
+    console.log('Bought for' + value + ' with factor ' + this.currentFactor);
+    let stock = await this.connection.createMarketBuyOrder(this.stockSymbol, this.currentFactor);
+    console.log(stock);
+
+    let s = new Stock(stock.orderId, stock.positionId, TransactionMode.Buy, value, this.currentFactor);
+    this.stocks.push(s);
     this.currentFactor *= this.jumpFactor;
-    //this.bounds.upper = value;
   }
 
   async sellPosition(value: number) {
-    let stock = await this.connection.createMarketSellOrder(
-      this.stockSymbol,
-      this.currentFactor,
-    );
+    console.log('Sold for' + value + ' with factor ' + this.currentFactor);
+    let stock = await this.connection.createMarketSellOrder(this.stockSymbol, this.currentFactor);
 
-    this.stocks.push(
-      new Stock(stock.orderId, stock.positionId, TransactionMode.Sell, value),
-    );
-    this.txnCounter += 1;
-    this.lastTxnMode = TransactionMode.Sell;
+    this.stocks.push(new Stock(stock.orderId, stock.positionId, TransactionMode.Sell, value, this.currentFactor));
     this.currentFactor *= this.jumpFactor;
-    //this.bounds.lower = value;
   }
 
   async triggerClose(value: number, mode: TransactionMode) {
     if (this.maxTxnLimit > 0) {
-      if (this.txnCounter <= this.maxTxnLimit && this.lastTxnMode == mode) {
+      if (this.counter <= this.maxTxnLimit && this.lastMode == mode) {
         await this.closePosition();
         await this.buyPosition(value);
-        // this.bounds.lower = value - this.threshold;
       }
     } else {
       await this.closePosition();
       await this.buyPosition(value);
-      // this.bounds.lower = value - this.threshold;
     }
   }
 
   async triggerBuy(value: number) {
     if (this.maxTxnLimit > 0) {
-      if (this.txnCounter < this.maxTxnLimit) {
+      if (this.counter < this.maxTxnLimit) {
         await this.buyPosition(value);
       }
     } else {
@@ -109,7 +107,7 @@ export class Executor {
 
   async triggerSell(value: number) {
     if (this.maxTxnLimit > 0) {
-      if (this.txnCounter < this.maxTxnLimit) {
+      if (this.counter < this.maxTxnLimit) {
         await this.sellPosition(value);
       }
     } else {
@@ -118,17 +116,20 @@ export class Executor {
   }
 
   removePosition(positionId: string) {
-    this.stocks.filter((item) => item.position != positionId);
-    this.txnCounter = this.stocks.length;
+    this.stocks.find((item) => item.position == positionId)?.close();
+  }
+
+  get counter() {
+    return this.stocks.length;
+  }
+
+  get lastMode() {
+    return this.stocks.at(-1)?.mode;
   }
 
   get bounds() {
-    let upper = this.stocks
-      .filter((x) => x.mode == TransactionMode.Buy)
-      .at(-1)?.price;
-    let lower = this.stocks
-      .filter((x) => x.mode == TransactionMode.Sell)
-      .at(-1)?.price;
+    let upper = this.stocks.filter((x) => x.mode == TransactionMode.Buy).at(-1)?.price;
+    let lower = this.stocks.filter((x) => x.mode == TransactionMode.Sell).at(-1)?.price;
     upper = upper || lower + this.threshold;
     lower = lower || upper - this.threshold;
     return new Bounds(upper, lower);
@@ -137,28 +138,19 @@ export class Executor {
   async send(price: Price) {
     let upper = this.bounds.upper || price.ask;
     let lower = this.bounds.lower || price.bid;
-    console.log('Upper ' + upper);
-    console.log('Lower ' + lower);
     if (price.ask >= upper) {
       if (price.ask >= upper + this.threshold) {
-        console.log('Upper');
-        console.log('Bid ' + price.ask);
-        console.log('Upper Bound ' + upper);
-        console.log('Threshold' + this.threshold);
         await this.triggerClose(price.ask, TransactionMode.Buy);
-      } else if (this.lastTxnMode != TransactionMode.Buy) {
-        console.log('Triggered Buy');
+      } else if (this.lastMode != TransactionMode.Buy) {
+        console.log('Triggered Buy from ' + this.name);
+        console.log(this.stocks.length);
         await this.triggerBuy(price.ask);
       }
     } else if (price.bid <= lower) {
       if (price.bid <= lower - this.threshold) {
-        console.log('Lower');
-        console.log('Bid ' + price.bid);
-        console.log('Lower Bound ' + lower);
-        console.log('Threshold' + this.threshold);
         await this.triggerClose(price.ask, TransactionMode.Sell);
-      } else if (this.lastTxnMode != TransactionMode.Sell) {
-        console.log('Triggered Sell');
+      } else if (this.lastMode != TransactionMode.Sell) {
+        console.log('Triggered Sell ' + this.name);
         await this.triggerSell(price.bid);
       }
     }

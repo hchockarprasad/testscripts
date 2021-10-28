@@ -14,15 +14,13 @@ class QuoteListener extends SynchronizationListener {
   }
 
   async onSymbolPriceUpdated(_: string, price: Price) {
-    console.log(price);
     if (price.symbol === SYMBOL) {
-      console.log(price);
-      // await this.executor.send(price);
+      await this.executor.send(price);
     }
   }
 
   async onPositionRemoved(_: string, positionId: string) {
-    // this.executor.removePosition(positionId);
+    this.executor.removePosition(positionId);
   }
 }
 
@@ -40,11 +38,13 @@ export class AppService {
     let accounts = await this._metaApi.metatraderAccountApi.getAccounts();
     for (const account of accounts) {
       let connection = await account.getStreamingConnection();
-      const executor = new Executor(connection, 5, 0.25, 5);
-      const quoteListener = new QuoteListener(executor);
-      connection.addSynchronizationListener(quoteListener);
       await connection.waitSynchronized();
       await connection.subscribeToMarketData('XAUUSD');
+      let env = JSON.parse(this.config.get('execConfig'));
+      let { jumpFactor, threshold, initFactor, maxTxnLimit } = env[account.id];
+      const executor = new Executor(account.name, connection, jumpFactor, threshold, initFactor, maxTxnLimit);
+      const quoteListener = new QuoteListener(executor);
+      connection.addSynchronizationListener(quoteListener);
     }
   }
 
